@@ -20,10 +20,12 @@ import (
 	"go.opentelemetry.io/collector/component"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/stanzareceiver"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/telegrafreceiver"
 )
 
 func extraReceivers() []component.ReceiverFactory {
 	return []component.ReceiverFactory{
 		stanzareceiver.NewFactory(),
+		telegrafreceiver.NewFactory(),
 	}
 }
