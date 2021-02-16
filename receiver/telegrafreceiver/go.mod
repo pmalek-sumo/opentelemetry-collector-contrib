@@ -3,7 +3,7 @@ module github.com/open-telemetry/opentelemetry-collector-contrib/receiver/telegr
 go 1.14
 
 require (
-	github.com/pmalek-sumo/telegraf v1.17.6
-	go.opentelemetry.io/collector v0.19.0
+	github.com/pmalek-sumo/telegraf v1.17.8
+	go.opentelemetry.io/collector v0.20.0
 	go.uber.org/zap v1.16.0
 )

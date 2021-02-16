@@ -16,22 +16,23 @@ package telegrafreceiver
 
 import (
 	"context"
+	"fmt"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configmodels"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 
-	telegraf "github.com/pmalek-sumo/telegraf/agent"
+	telegrafagent "github.com/pmalek-sumo/telegraf/agent"
+	telegrafconfig "github.com/pmalek-sumo/telegraf/config"
 )
 
 const (
-	typeStr = "telegraf"
-	verStr  = "0.12.0"
+	typeStr    = "telegraf"
+	versionStr = "v0.1"
 )
 
-// NewFactory creates a factory for Stanza receiver
-// TODO
+// NewFactory creates a factory for telegraf receiver.
 func NewFactory() component.ReceiverFactory {
 	return receiverhelper.NewFactory(
 		typeStr,
@@ -41,44 +42,40 @@ func NewFactory() component.ReceiverFactory {
 }
 
 func createDefaultConfig() configmodels.Receiver {
-	return nil
+	return &Config{
+		ReceiverSettings: configmodels.ReceiverSettings{
+			TypeVal: configmodels.Type(typeStr),
+			NameVal: typeStr,
+		},
+		SeparateField: false,
+	}
 }
 
-// CreateLogsReceiver creates a logs receiver based on provided config
-// TODO
+// createMetricsReceiver creates a metrics receiver based on provided config.
 func createMetricsReceiver(
 	ctx context.Context,
 	params component.ReceiverCreateParams,
 	cfg configmodels.Receiver,
 	nextConsumer consumer.MetricsConsumer,
 ) (component.MetricsReceiver, error) {
+	tCfg, ok := cfg.(*Config)
+	if !ok {
+		return nil, fmt.Errorf("failed reading telegraf agent config from otc config")
+	}
 
-	// obsConfig := cfg.(*Config)
-
-	// emitter := NewLogEmitter(params.Logger.Sugar())
-
-	// pipeline, err := obsConfig.Operators.IntoPipelineConfig()
-	// if err != nil {
-	// 	return nil, err
-	// }
-	var err error
-
-	agent, err := telegraf.NewAgent(nil)
-	_ = agent
-	// logAgent, err := stanza.NewBuilder(params.Logger.Sugar()).
-	// 	WithConfig(&stanza.Config{Pipeline: pipeline}).
-	// 	WithPluginDir(obsConfig.PluginDir).
-	// 	WithDatabaseFile(obsConfig.OffsetsFile).
-	// 	WithDefaultOutput(emitter).
-	// 	Build()
+	tConfig := telegrafconfig.NewConfig()
+	if err := tConfig.LoadConfigData([]byte(tCfg.AgentConfig)); err != nil {
+		return nil, fmt.Errorf("failed loading telegraf agent config: %w", err)
+	}
+	tAgent, err := telegrafagent.NewAgent(tConfig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed creating telegraf agent: %w", err)
 	}
 
 	return &telegrafreceiver{
-		agent: agent,
-		// 	emitter:  emitter,
-		// 	consumer: nextConsumer,
-		// 	logger:   params.Logger,
+		agent:           tAgent,
+		consumer:        nextConsumer,
+		logger:          params.Logger,
+		metricConverter: newConverter(tCfg.SeparateField),
 	}, nil
 }

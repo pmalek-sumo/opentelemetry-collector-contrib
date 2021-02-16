@@ -17,14 +17,15 @@ package telegrafreceiver
 import (
 	"context"
 	"sync"
-	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenterror"
 	"go.opentelemetry.io/collector/consumer"
 
-	telegraf "github.com/pmalek-sumo/telegraf/agent"
 	"go.uber.org/zap"
+
+	"github.com/pmalek-sumo/telegraf"
+	telegrafagent "github.com/pmalek-sumo/telegraf/agent"
 )
 
 type telegrafreceiver struct {
@@ -34,11 +35,10 @@ type telegrafreceiver struct {
 	wg        sync.WaitGroup
 	cancel    context.CancelFunc
 
-	// agent  *stanza.LogAgent
-	agent *telegraf.Agent
-	// emitter  *LogEmitter
-	consumer consumer.MetricsConsumer
-	logger   *zap.Logger
+	agent           *telegrafagent.Agent
+	consumer        consumer.MetricsConsumer
+	logger          *zap.Logger
+	metricConverter MetricConverter
 }
 
 // Ensure this receiver adheres to required interface
@@ -46,19 +46,23 @@ var _ component.MetricsReceiver = (*telegrafreceiver)(nil)
 
 // Start tells the receiver to start
 func (r *telegrafreceiver) Start(ctx context.Context, host component.Host) error {
+	r.logger.Info("Starting telegraf receiver")
+
 	r.Lock()
 	defer r.Unlock()
+
 	err := componenterror.ErrAlreadyStarted
 	r.startOnce.Do(func() {
 		err = nil
 		rctx, cancel := context.WithCancel(ctx)
 		r.cancel = cancel
-		r.logger.Info("Starting telegraf receiver")
 
-		// if obsErr := r.agent.Run(rctx); obsErr != nil {
-		// 	err = fmt.Errorf("start telegaf receiver: %s", obsErr)
-		// 	return
-		// }
+		ch := make(chan telegraf.Metric)
+		go func() {
+			if rErr := r.agent.RunWithChannel(rctx, ch); rErr != nil {
+				r.logger.Error("Problem starting receiver: %v", zap.Error(rErr))
+			}
+		}()
 
 		r.wg.Add(1)
 		go func() {
@@ -67,16 +71,31 @@ func (r *telegrafreceiver) Start(ctx context.Context, host component.Host) error
 				select {
 				case <-rctx.Done():
 					return
-				case <-time.After(time.Second):
-					r.logger.Info("ping")
-					// case obsLog, ok := <-r.emitter.metricsChan:
-					// 	if !ok {
-					// 		continue
-					// 	}
 
-					// 	if consumeErr := r.consumer.ConsumeMetrics(ctx, nil); consumeErr != nil {
-					// 		r.logger.Error("ConsumeLogs() error", zap.String("error", consumeErr.Error()))
-					// 	}
+				case m, ok := <-ch:
+					if !ok {
+						r.logger.Info("channel closed")
+						return
+					}
+					if m == nil {
+						r.logger.Info("got nil from channel")
+						break
+					}
+
+					ms, err := r.metricConverter.Convert(m)
+					if err != nil {
+						r.logger.Error(
+							"Error converting telegraf.Metric to pdata.Metrics",
+							zap.Error(err),
+						)
+						continue
+					}
+
+					if consumeErr := r.consumer.ConsumeMetrics(ctx, ms); consumeErr != nil {
+						r.logger.Error("ConsumeMetrics() error",
+							zap.String("error", consumeErr.Error()),
+						)
+					}
 				}
 			}
 		}()
@@ -85,7 +104,7 @@ func (r *telegrafreceiver) Start(ctx context.Context, host component.Host) error
 	return err
 }
 
-// Shutdown is invoked during service shutdown
+// Shutdown is invoked during service shutdown.
 func (r *telegrafreceiver) Shutdown(context.Context) error {
 	r.Lock()
 	defer r.Unlock()
