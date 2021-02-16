@@ -42,13 +42,14 @@ type metricPair struct {
 }
 
 type sender struct {
-	logBuffer           []pdata.LogRecord
-	metricBuffer        []metricPair
-	config              *Config
-	client              *http.Client
-	filter              filter
-	sources             sourceFormats
-	compressor          compressor
+	logBuffer    []pdata.LogRecord
+	metricBuffer []metricPair
+	config       *Config
+	client       *http.Client
+	filter       filter
+	sources      sourceFormats
+	compressor   compressor
+	// TODO change to interface
 	prometheusFormatter prometheusFormatter
 }
 
@@ -67,6 +68,7 @@ const (
 
 	contentTypeLogs       string = "application/x-www-form-urlencoded"
 	contentTypePrometheus string = "application/vnd.sumologic.prometheus"
+	contentTypeCarbon2    string = "application/vnd.sumologic.carbon2"
 
 	contentEncodingGzip    string = "gzip"
 	contentEncodingDeflate string = "deflate"
@@ -138,6 +140,8 @@ func (s *sender) send(ctx context.Context, pipeline PipelineType, body io.Reader
 		req.Header.Add(headerFields, flds.string())
 	case MetricsPipeline:
 		switch s.config.MetricFormat {
+		case Carbon2Format:
+			req.Header.Add(headerContentType, contentTypeCarbon2)
 		case PrometheusFormat:
 			req.Header.Add(headerContentType, contentTypePrometheus)
 		default:
@@ -255,6 +259,8 @@ func (s *sender) sendMetrics(ctx context.Context, flds fields) ([]metricPair, er
 		var err error
 
 		switch s.config.MetricFormat {
+		case Carbon2Format:
+			formattedLine = metric2Carbon2(record)
 		case PrometheusFormat:
 			formattedLine = s.prometheusFormatter.metric2String(record)
 		default:
